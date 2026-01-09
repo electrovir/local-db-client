@@ -1,5 +1,6 @@
 {
     "compilerOptions": {
+        "allowJs": true,
         "outDir": "./dist/",
         "rootDir": "./src/"
     },
@@ -12,5 +13,8 @@
         "./test-files/",
         "src/all-files-for-code-coverage.test.ts"
     ],
-    "extends": "@virmator/compile/configs/tsconfig.base.json"
+    "extends": "@virmator/compile/configs/tsconfig.base.json",
+    "include": [
+        "./src/"
+    ]
 }

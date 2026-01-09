@@ -1,10 +1,14 @@
-// @ts-expect-error: this has no types
-import localForageImport from './localforage/localforage.js';
-
 import {type AnyObject} from '@augment-vir/common';
-import type * as LocalForageType from 'localforage';
+import type LocalForageInstance from 'localforage';
 
-export const LocalForage = localForageImport as typeof LocalForageType;
+import {type Constructor} from 'type-fest';
+import LocalForageImport from './localforage/localforage.js';
+
+export const LocalForage = LocalForageImport as unknown as Constructor<typeof LocalForageInstance> &
+    typeof LocalForageInstance;
+
+/** Re-export the LocalForage type from the npm package for type annotations. */
+export type LocalForage = typeof LocalForageInstance;
 
 export async function iterateLocalForageValues(localForage: Readonly<LocalForage>) {
     const values: AnyObject = {};
