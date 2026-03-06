@@ -20,7 +20,7 @@ npm i local-db-client
 import {defineShape} from 'object-shape-tester';
 import {LocalDbClient} from 'local-db-client';
 
-const myClient = new LocalDbClient({
+const myClient = await LocalDbClient.createClient({
     stringValue: defineShape(''),
     numberValue: defineShape(-1),
     booleanValue: defineShape(false),
@@ -42,6 +42,9 @@ await myClient.set.booleanValue(true);
 /** Delete a stored value. */
 await myClient.delete.booleanValue();
 
-/** Get a stored value. If the stored value is not valid, `undefined` is returned. */
-await myClient.get.objectValue();
+/** Load a stored value. If the stored value is not valid, `undefined` is returned. */
+console.info(myClient.value);
+
+/** Force a value to reload. */
+await myClient.load.objectValue();
 ```

@@ -1,6 +1,6 @@
 {
     "name": "local-db-client",
-    "version": "0.0.2",
+    "version": "1.0.0",
     "description": "Type safe IndexedDB access.",
     "keywords": [
         "safe",
@@ -48,7 +48,8 @@
     "dependencies": {
         "@augment-vir/assert": "^31.57.5",
         "@augment-vir/common": "^31.57.5",
-        "object-shape-tester": "^6.11.0"
+        "object-shape-tester": "^6.11.0",
+        "typed-event-target": "^4.2.0"
     },
     "devDependencies": {
         "@augment-vir/test": "^31.57.5",
