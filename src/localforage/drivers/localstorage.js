@@ -3,11 +3,11 @@
 // side-effects (all data will be serialized on save and only data that
 // can be converted to a string via `JSON.stringify()` will be saved).
 
-import isLocalStorageValid from '../utils/isLocalStorageValid';
-import serializer from '../utils/serializer';
-import executeCallback from '../utils/executeCallback';
-import normalizeKey from '../utils/normalizeKey';
-import getCallback from '../utils/getCallback';
+import isLocalStorageValid from '../utils/isLocalStorageValid.js';
+import serializer from '../utils/serializer.js';
+import executeCallback from '../utils/executeCallback.js';
+import normalizeKey from '../utils/normalizeKey.js';
+import getCallback from '../utils/getCallback.js';
 
 function _getKeyPrefix(options, defaultConfig) {
     var keyPrefix = options.name + '/';

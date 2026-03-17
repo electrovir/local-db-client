@@ -1,10 +1,10 @@
-import isIndexedDBValid from '../utils/isIndexedDBValid';
-import createBlob from '../utils/createBlob';
-import idb from '../utils/idb';
-import executeCallback from '../utils/executeCallback';
-import executeTwoCallbacks from '../utils/executeTwoCallbacks';
-import normalizeKey from '../utils/normalizeKey';
-import getCallback from '../utils/getCallback';
+import isIndexedDBValid from '../utils/isIndexedDBValid.js';
+import createBlob from '../utils/createBlob.js';
+import idb from '../utils/idb.js';
+import executeCallback from '../utils/executeCallback.js';
+import executeTwoCallbacks from '../utils/executeTwoCallbacks.js';
+import normalizeKey from '../utils/normalizeKey.js';
+import getCallback from '../utils/getCallback.js';
 
 // Some code originally from async_storage.js in
 // [Gaia](https://github.com/mozilla-b2g/gaia).
