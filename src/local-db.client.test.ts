@@ -26,12 +26,17 @@ const testShapes = {
 describe(LocalDbClient.name, () => {
     async function createTestClient() {
         const storeName = `test-store-${randomString(32)}`;
-        const testClient = await LocalDbClient.createClient(testShapes, {storeName});
+        const testClient = await LocalDbClient.createClient(testShapes, {
+            storeName,
+        });
         await testClient.clear();
 
         const store = new Store(testClient.storeName);
 
-        return {testClient, store};
+        return {
+            testClient,
+            store,
+        };
     }
 
     it('uses default store name when not provided', async () => {
@@ -41,7 +46,9 @@ describe(LocalDbClient.name, () => {
 
     it('uses custom store name when provided', async () => {
         const storeName = 'custom-store-name';
-        const testClient = await LocalDbClient.createClient(testShapes, {storeName});
+        const testClient = await LocalDbClient.createClient(testShapes, {
+            storeName,
+        });
         assert.strictEquals(testClient.storeName, storeName);
     });
 
@@ -97,14 +104,20 @@ describe(LocalDbClient.name, () => {
             openRequest.onupgradeneeded = () => {
                 openRequest.result.createObjectStore('keyvaluepairs');
             };
-            openRequest.onerror = () => reject(openRequest.error);
+            openRequest.onerror = () =>
+                reject(
+                    openRequest.error || new Error(`Failed to open database '${databaseName}'.`),
+                );
             openRequest.onsuccess = () => {
                 const database = openRequest.result;
                 const objectStore = database
                     .transaction('keyvaluepairs', 'readwrite')
                     .objectStore('keyvaluepairs');
-                getObjectTypedEntries(entries).forEach(([key, value]) =>
-                    objectStore.put(value, String(key)),
+                getObjectTypedEntries(entries).forEach(
+                    ([
+                        key,
+                        value,
+                    ]) => objectStore.put(value, key),
                 );
                 objectStore.transaction.oncomplete = () => {
                     database.close();
@@ -112,7 +125,10 @@ describe(LocalDbClient.name, () => {
                 };
                 objectStore.transaction.onerror = () => {
                     database.close();
-                    reject(objectStore.transaction.error);
+                    reject(
+                        objectStore.transaction.error ||
+                            new Error(`Failed to seed legacy store in database '${databaseName}'.`),
+                    );
                 };
             };
         });
@@ -126,7 +142,9 @@ describe(LocalDbClient.name, () => {
                 numberValue: 7,
             });
 
-            const testClient = await LocalDbClient.createClient(testShapes, {storeName});
+            const testClient = await LocalDbClient.createClient(testShapes, {
+                storeName,
+            });
 
             assert.deepEquals(testClient.value, {
                 stringValue: 'migrated string',
@@ -140,7 +158,9 @@ describe(LocalDbClient.name, () => {
                 stringValue: 'migrated string',
             });
 
-            await LocalDbClient.createClient(testShapes, {storeName});
+            await LocalDbClient.createClient(testShapes, {
+                storeName,
+            });
 
             const store = new Store(storeName);
             assert.strictEquals(await store.getItem('stringValue'), 'migrated string');
@@ -153,7 +173,9 @@ describe(LocalDbClient.name, () => {
                 numberValue: 'no longer a number',
             });
 
-            const testClient = await LocalDbClient.createClient(testShapes, {storeName});
+            const testClient = await LocalDbClient.createClient(testShapes, {
+                storeName,
+            });
 
             assert.deepEquals(testClient.value, {
                 stringValue: 'still valid',
@@ -162,7 +184,9 @@ describe(LocalDbClient.name, () => {
 
         it('is a no-op when there is no legacy store', async () => {
             const storeName = `test-store-${randomString(32)}`;
-            const testClient = await LocalDbClient.createClient(testShapes, {storeName});
+            const testClient = await LocalDbClient.createClient(testShapes, {
+                storeName,
+            });
 
             assert.deepEquals(testClient.value, {});
 
@@ -199,7 +223,10 @@ describe(LocalDbClient.name, () => {
         it('stores an object value', async () => {
             const {testClient} = await createTestClient();
 
-            const objectValue = {name: 'John', age: 30};
+            const objectValue = {
+                name: 'John',
+                age: 30,
+            };
             await testClient.set.objectValue(objectValue);
 
             assert.deepEquals(testClient.value.objectValue, objectValue);
@@ -221,7 +248,11 @@ describe(LocalDbClient.name, () => {
         it('stores a nested object value', async () => {
             const {testClient} = await createTestClient();
 
-            const nestedValue = {outer: {inner: 'deep value'}};
+            const nestedValue = {
+                outer: {
+                    inner: 'deep value',
+                },
+            };
             await testClient.set.nestedValue(nestedValue);
 
             assert.deepEquals(testClient.value.nestedValue, nestedValue);
@@ -259,15 +290,21 @@ describe(LocalDbClient.name, () => {
             const {testClient} = await createTestClient();
 
             await assert.throws(async () => {
-                // @ts-expect-error intentionally passing wrong type
-                await testClient.set.objectValue({wrongKey: 'value'});
+                await testClient.set.objectValue({
+                    // @ts-expect-error intentionally passing wrong type
+                    wrongKey: 'value',
+                });
             });
         });
 
         it('allows extra keys in objects', async () => {
             const {testClient} = await createTestClient();
 
-            const objectWithExtra = {name: 'John', age: 30, extra: 'allowed'} as {
+            const objectWithExtra = {
+                name: 'John',
+                age: 30,
+                extra: 'allowed',
+            } as {
                 name: string;
                 age: number;
             };
@@ -374,7 +411,10 @@ describe(LocalDbClient.name, () => {
         it('retrieves a stored object value', async () => {
             const {testClient} = await createTestClient();
 
-            const objectValue = {name: 'Jane', age: 25};
+            const objectValue = {
+                name: 'Jane',
+                age: 25,
+            };
             await testClient.set.objectValue(objectValue);
 
             assert.deepEquals(testClient.value.objectValue, objectValue);
@@ -396,7 +436,11 @@ describe(LocalDbClient.name, () => {
         it('retrieves a stored nested object value', async () => {
             const {testClient} = await createTestClient();
 
-            const nestedValue = {outer: {inner: 'nested content'}};
+            const nestedValue = {
+                outer: {
+                    inner: 'nested content',
+                },
+            };
             await testClient.set.nestedValue(nestedValue);
 
             assert.deepEquals(testClient.value.nestedValue, nestedValue);
@@ -448,16 +492,24 @@ describe(LocalDbClient.name, () => {
 
             await store.setItem('stringValue', 12_345);
 
-            await assert.throws(() => testClient.load.stringValue({throwErrorOnFailure: true}), {
-                matchMessage: "Invalid value at key 'stringValue'",
-            });
+            await assert.throws(
+                () =>
+                    testClient.load.stringValue({
+                        throwErrorOnFailure: true,
+                    }),
+                {
+                    matchMessage: "Invalid value at key 'stringValue'",
+                },
+            );
         });
 
         it('returns valid value when loading with throwErrorOnFailure', async () => {
             const {testClient} = await createTestClient();
 
             await testClient.set.stringValue('valid');
-            const result = await testClient.load.stringValue({throwErrorOnFailure: true});
+            const result = await testClient.load.stringValue({
+                throwErrorOnFailure: true,
+            });
             assert.strictEquals(result, 'valid');
         });
 
@@ -542,14 +594,20 @@ describe(LocalDbClient.name, () => {
             await testClient.set.stringValue('valid');
 
             // This should work fine since the value is valid
-            const result = await testClient.loadAllValues({throwErrorOnFailure: true});
+            const result = await testClient.loadAllValues({
+                throwErrorOnFailure: true,
+            });
             assert.strictEquals(result.stringValue, 'valid');
         });
 
         it('allows extra keys in stored objects when validating', async () => {
             const {testClient} = await createTestClient();
 
-            const objectWithExtra = {name: 'Test', age: 20, extraKey: 'extra'} as {
+            const objectWithExtra = {
+                name: 'Test',
+                age: 20,
+                extraKey: 'extra',
+            } as {
                 name: string;
                 age: number;
             };
@@ -557,7 +615,11 @@ describe(LocalDbClient.name, () => {
 
             const result = await testClient.loadAllValues();
 
-            assert.deepEquals(result.objectValue, {name: 'Test', age: 20, extraKey: 'extra'});
+            assert.deepEquals(result.objectValue, {
+                name: 'Test',
+                age: 20,
+                extraKey: 'extra',
+            });
         });
 
         it('ignores keys in storage that have no shape definition', async () => {
@@ -585,9 +647,15 @@ describe(LocalDbClient.name, () => {
 
             await store.setItem('stringValue', 12_345); // should be a string
 
-            await assert.throws(() => testClient.loadAllValues({throwErrorOnFailure: true}), {
-                matchMessage: "Invalid value at key 'stringValue'",
-            });
+            await assert.throws(
+                () =>
+                    testClient.loadAllValues({
+                        throwErrorOnFailure: true,
+                    }),
+                {
+                    matchMessage: "Invalid value at key 'stringValue'",
+                },
+            );
         });
 
         it('excludes invalid values in loadAllValues when throwErrorOnFailure is false', async () => {

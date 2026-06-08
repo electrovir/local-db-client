@@ -1,6 +1,6 @@
 // cspell:word keyvaluepairs
 
-import {getObjectTypedEntries, type AnyObject} from '@augment-vir/common';
+import {getObjectTypedEntries, stringify, type AnyObject} from '@augment-vir/common';
 import {type Store} from 'indexed-vir';
 
 /**
@@ -71,7 +71,7 @@ function readAndDeleteLegacyStore(databaseName: string): Promise<AnyObject | und
             cursorRequest.onsuccess = () => {
                 const cursor = cursorRequest.result;
                 if (cursor) {
-                    data[String(cursor.key)] = cursor.value;
+                    data[stringify(cursor.key)] = cursor.value;
                     cursor.continue();
                 } else {
                     database.close();

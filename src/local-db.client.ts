@@ -133,10 +133,16 @@ export class LocalDbClient<
                     assertValidShape(
                         rawValue,
                         shapeDefinition,
-                        {allowExtraKeys: true},
+                        {
+                            allowExtraKeys: true,
+                        },
                         `Invalid value at key '${String(key)}'`,
                     );
-                } else if (!checkValidShape(rawValue, shapeDefinition, {allowExtraKeys: true})) {
+                } else if (
+                    !checkValidShape(rawValue, shapeDefinition, {
+                        allowExtraKeys: true,
+                    })
+                ) {
                     delete this.value[key];
                     this.dispatch(new LocalDbClientValueUpdateEvent());
                     return undefined;
@@ -169,7 +175,9 @@ export class LocalDbClient<
                     assertValidShape(
                         newValue,
                         this.shapes[key],
-                        {allowExtraKeys: true},
+                        {
+                            allowExtraKeys: true,
+                        },
                         `LocalDbClient: Invalid value for key '${String(key)}'.`,
                     );
                     await this.store.setItem(String(key), newValue);
@@ -220,10 +228,16 @@ export class LocalDbClient<
                 assertValidShape(
                     value,
                     shapeDefinition,
-                    {allowExtraKeys: true},
+                    {
+                        allowExtraKeys: true,
+                    },
                     `Invalid value at key '${String(key)}'`,
                 );
-            } else if (!checkValidShape(value, shapeDefinition, {allowExtraKeys: true})) {
+            } else if (
+                !checkValidShape(value, shapeDefinition, {
+                    allowExtraKeys: true,
+                })
+            ) {
                 return undefined;
             }
 

@@ -74,6 +74,40 @@ function createDatabaseName() {
     return `migrate-test-${randomString(32)}`;
 }
 
+/**
+ * A minimal stand-in for the IndexedDB request objects whose `onerror`/`onsuccess` handlers the
+ * migration logic assigns. Real IndexedDB will not produce these error events on its own, so the
+ * error branches are driven through stubs shaped like this.
+ */
+type FakeRequest = {
+    error?: DOMException | undefined;
+    result?: unknown;
+    onerror?: (() => void) | undefined;
+    onsuccess?: (() => void) | undefined;
+};
+
+/** Builds a fake request whose `onerror` handler fires on the next microtask with no `error` set. */
+function createImmediateErrorRequest() {
+    const request: FakeRequest = {};
+    queueMicrotask(() => request.onerror?.());
+    return request as unknown as IDBOpenDBRequest;
+}
+
+/** Runs `callback` with the given `indexedDB` method replaced by `stub`, restoring it afterward. */
+async function withStubbedIndexedDb<Key extends 'open' | 'deleteDatabase'>(
+    methodName: Key,
+    stub: (typeof indexedDB)[Key],
+    callback: () => Promise<void>,
+) {
+    const original = indexedDB[methodName];
+    indexedDB[methodName] = stub;
+    try {
+        await callback();
+    } finally {
+        indexedDB[methodName] = original;
+    }
+}
+
 describe(migrateLegacyLocalForageStore.name, () => {
     it('migrates all legacy values into the given store', async () => {
         const databaseName = createDatabaseName();
@@ -146,6 +180,67 @@ describe(migrateLegacyLocalForageStore.name, () => {
 
         assert.deepEquals(await readAllStoreValues(store), {
             existing: 'previously migrated',
+        });
+    });
+
+    it('rejects when the legacy database fails to open', async () => {
+        const databaseName = createDatabaseName();
+        const store = new Store(databaseName);
+
+        await withStubbedIndexedDb('open', createImmediateErrorRequest, async () => {
+            await assert.throws(() => migrateLegacyLocalForageStore(databaseName, store), {
+                matchMessage: 'Failed to open database',
+            });
+        });
+    });
+
+    it('rejects when reading the legacy store fails', async () => {
+        const databaseName = createDatabaseName();
+        const store = new Store(databaseName);
+
+        const openStub: typeof indexedDB.open = () => {
+            const cursorRequest: FakeRequest = {};
+            const fakeDatabase = {
+                objectStoreNames: {
+                    contains: () => true,
+                    length: 1,
+                },
+                close: () => undefined,
+                transaction: () => {
+                    return {
+                        objectStore: () => {
+                            return {
+                                openCursor: () => {
+                                    queueMicrotask(() => cursorRequest.onerror?.());
+                                    return cursorRequest;
+                                },
+                            };
+                        },
+                    };
+                },
+            };
+            const openRequest: FakeRequest = {
+                result: fakeDatabase,
+            };
+            queueMicrotask(() => openRequest.onsuccess?.());
+            return openRequest as unknown as IDBOpenDBRequest;
+        };
+
+        await withStubbedIndexedDb('open', openStub, async () => {
+            await assert.throws(() => migrateLegacyLocalForageStore(databaseName, store), {
+                matchMessage: 'Failed to read legacy store',
+            });
+        });
+    });
+
+    it('rejects when deleting the legacy database fails', async () => {
+        const databaseName = createDatabaseName();
+        const store = new Store(databaseName);
+
+        await withStubbedIndexedDb('deleteDatabase', createImmediateErrorRequest, async () => {
+            await assert.throws(() => migrateLegacyLocalForageStore(databaseName, store), {
+                matchMessage: 'Failed to delete database',
+            });
         });
     });
 });
