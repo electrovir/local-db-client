@@ -9,7 +9,6 @@ export default [
     {
         ignores: [
             /** Add file globs that should be ignored. */
-            'src/localforage/',
         ],
     },
     {

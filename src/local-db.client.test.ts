@@ -1,9 +1,11 @@
+// cspell:word keyvaluepairs
+
 import {assert} from '@augment-vir/assert';
-import {randomString} from '@augment-vir/common';
+import {getObjectTypedEntries, randomString} from '@augment-vir/common';
 import {describe, it} from '@augment-vir/test';
+import {Store} from 'indexed-vir';
 import {defineShape} from 'object-shape-tester';
 import {LocalDbClient, LocalDbClientValueUpdateEvent} from './local-db.client.js';
-import {LocalForage} from './local-forage.js';
 
 const testShapes = {
     stringValue: defineShape('default string'),
@@ -27,11 +29,9 @@ describe(LocalDbClient.name, () => {
         const testClient = await LocalDbClient.createClient(testShapes, {storeName});
         await testClient.clear();
 
-        const localForage = LocalForage.createInstance({
-            name: testClient.storeName,
-        });
+        const store = new Store(testClient.storeName);
 
-        return {testClient, localForage};
+        return {testClient, store};
     }
 
     it('uses default store name when not provided', async () => {
@@ -79,12 +79,96 @@ describe(LocalDbClient.name, () => {
         assert.strictEquals(await testClient2.load.stringValue(), 'shared value');
     });
 
-    it('shares store with LocalForage', async () => {
-        const {testClient, localForage} = await createTestClient();
+    it('shares store with a raw indexed-vir Store', async () => {
+        const {testClient, store} = await createTestClient();
         const value = 'some value';
         await testClient.set.stringValue(value);
 
-        assert.strictEquals(await localForage.getItem('stringValue'), value);
+        assert.strictEquals(await store.getItem('stringValue'), value);
+    });
+
+    /**
+     * Seeds a database with a legacy LocalForage-style object store (`keyvaluepairs`) so the
+     * migration path can be exercised.
+     */
+    function seedLegacyLocalForageStore(databaseName: string, entries: Record<string, unknown>) {
+        return new Promise<void>((resolve, reject) => {
+            const openRequest = indexedDB.open(databaseName, 1);
+            openRequest.onupgradeneeded = () => {
+                openRequest.result.createObjectStore('keyvaluepairs');
+            };
+            openRequest.onerror = () => reject(openRequest.error);
+            openRequest.onsuccess = () => {
+                const database = openRequest.result;
+                const objectStore = database
+                    .transaction('keyvaluepairs', 'readwrite')
+                    .objectStore('keyvaluepairs');
+                getObjectTypedEntries(entries).forEach(([key, value]) =>
+                    objectStore.put(value, String(key)),
+                );
+                objectStore.transaction.oncomplete = () => {
+                    database.close();
+                    resolve();
+                };
+                objectStore.transaction.onerror = () => {
+                    database.close();
+                    reject(objectStore.transaction.error);
+                };
+            };
+        });
+    }
+
+    describe('LocalForage migration', () => {
+        it('migrates data from a legacy LocalForage store', async () => {
+            const storeName = `test-store-${randomString(32)}`;
+            await seedLegacyLocalForageStore(storeName, {
+                stringValue: 'migrated string',
+                numberValue: 7,
+            });
+
+            const testClient = await LocalDbClient.createClient(testShapes, {storeName});
+
+            assert.deepEquals(testClient.value, {
+                stringValue: 'migrated string',
+                numberValue: 7,
+            });
+        });
+
+        it('moves migrated data into the indexed-vir store', async () => {
+            const storeName = `test-store-${randomString(32)}`;
+            await seedLegacyLocalForageStore(storeName, {
+                stringValue: 'migrated string',
+            });
+
+            await LocalDbClient.createClient(testShapes, {storeName});
+
+            const store = new Store(storeName);
+            assert.strictEquals(await store.getItem('stringValue'), 'migrated string');
+        });
+
+        it('drops migrated values that no longer match their shape', async () => {
+            const storeName = `test-store-${randomString(32)}`;
+            await seedLegacyLocalForageStore(storeName, {
+                stringValue: 'still valid',
+                numberValue: 'no longer a number',
+            });
+
+            const testClient = await LocalDbClient.createClient(testShapes, {storeName});
+
+            assert.deepEquals(testClient.value, {
+                stringValue: 'still valid',
+            });
+        });
+
+        it('is a no-op when there is no legacy store', async () => {
+            const storeName = `test-store-${randomString(32)}`;
+            const testClient = await LocalDbClient.createClient(testShapes, {storeName});
+
+            assert.deepEquals(testClient.value, {});
+
+            await testClient.set.stringValue('after migration');
+            assert.strictEquals(testClient.value.stringValue, 'after migration');
+        });
     });
 
     describe('set', () => {
@@ -342,12 +426,12 @@ describe(LocalDbClient.name, () => {
         });
 
         it('ignores invalid value', async () => {
-            const {testClient, localForage} = await createTestClient();
+            const {testClient, store} = await createTestClient();
             const validValue = 'valid';
             await testClient.set.stringValue('valid');
 
-            assert.strictEquals(await localForage.getItem('stringValue'), validValue);
-            await localForage.setItem('stringValue', 32);
+            assert.strictEquals(await store.getItem('stringValue'), validValue);
+            await store.setItem('stringValue', 32);
 
             assert.isUndefined(await testClient.load.stringValue());
         });
@@ -360,9 +444,9 @@ describe(LocalDbClient.name, () => {
         });
 
         it('throws error when loading invalid value with throwErrorOnFailure', async () => {
-            const {testClient, localForage} = await createTestClient();
+            const {testClient, store} = await createTestClient();
 
-            await localForage.setItem('stringValue', 12_345);
+            await store.setItem('stringValue', 12_345);
 
             await assert.throws(() => testClient.load.stringValue({throwErrorOnFailure: true}), {
                 matchMessage: "Invalid value at key 'stringValue'",
@@ -477,7 +561,7 @@ describe(LocalDbClient.name, () => {
         });
 
         it('ignores keys in storage that have no shape definition', async () => {
-            const {testClient, localForage} = await createTestClient();
+            const {testClient, store} = await createTestClient();
             const validValue = 'valid';
 
             await testClient.set.stringValue(validValue);
@@ -485,10 +569,10 @@ describe(LocalDbClient.name, () => {
             const mockKey = 'unknownKey';
 
             assert.strictEquals(testClient.value.stringValue, validValue);
-            /** Verify that both the client and the localForage are accessing the same store. */
-            assert.strictEquals(await localForage.getItem('stringValue'), validValue);
+            /** Verify that both the client and the raw store are accessing the same store. */
+            assert.strictEquals(await store.getItem('stringValue'), validValue);
 
-            await localForage.setItem(mockKey, 'some value');
+            await store.setItem(mockKey, 'some value');
 
             const result = await testClient.loadAllValues();
 
@@ -497,9 +581,9 @@ describe(LocalDbClient.name, () => {
         });
 
         it('can throws error in loadAllValues', async () => {
-            const {testClient, localForage} = await createTestClient();
+            const {testClient, store} = await createTestClient();
 
-            await localForage.setItem('stringValue', 12_345); // should be a string
+            await store.setItem('stringValue', 12_345); // should be a string
 
             await assert.throws(() => testClient.loadAllValues({throwErrorOnFailure: true}), {
                 matchMessage: "Invalid value at key 'stringValue'",
@@ -507,10 +591,10 @@ describe(LocalDbClient.name, () => {
         });
 
         it('excludes invalid values in loadAllValues when throwErrorOnFailure is false', async () => {
-            const {testClient, localForage} = await createTestClient();
+            const {testClient, store} = await createTestClient();
 
-            await localForage.setItem('stringValue', 12_345); // should be a string
-            await localForage.setItem('numberValue', 42); // valid
+            await store.setItem('stringValue', 12_345); // should be a string
+            await store.setItem('numberValue', 42); // valid
 
             const result = await testClient.loadAllValues();
 

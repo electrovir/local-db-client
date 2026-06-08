@@ -1,6 +1,6 @@
 # local-db-client
 
-An interface for storing values into IndexedDB with type safety. This uses [localforage](https://www.npmjs.com/package/localforage) under-the-hood.
+An interface for storing values into IndexedDB with type safety.
 
 For a synchronous, but more ephemeral, API using LocalStorage, see [@electrovir/local-storage-client](https://www.npmjs.com/package/@electrovir/local-storage-client)
 

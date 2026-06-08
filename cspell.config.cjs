@@ -4,7 +4,6 @@ module.exports = {
     ...baseConfig,
     ignorePaths: [
         ...baseConfig.ignorePaths,
-        'src/localforage/',
     ],
     words: [
         ...baseConfig.words,

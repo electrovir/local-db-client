@@ -6,9 +6,10 @@ import {
     type AnyObject,
     type PartialWithUndefined,
 } from '@augment-vir/common';
+import {Store} from 'indexed-vir';
 import {assertValidShape, checkValidShape, type Shape} from 'object-shape-tester';
 import {defineTypedEvent, ListenTarget} from 'typed-event-target';
-import {iterateLocalForageValues, LocalForage} from './local-forage.js';
+import {migrateLegacyLocalForageStore} from './migrate-local-forage.js';
 
 /**
  * Base type for the shapes type parameter in {@link LocalDbClient}.
@@ -87,7 +88,7 @@ export type LocalDbClientOptions = {
 };
 
 /**
- * An interface for storing values into IndexedDB using LocalForage with type safety.
+ * An interface for storing values into IndexedDB with type safety.
  *
  * Use the static {@link LocalDbClient.createClient} method to construct an instance.
  *
@@ -105,6 +106,7 @@ export class LocalDbClient<
         options: Readonly<PartialWithUndefined<LocalDbClientOptions>> = {},
     ): Promise<LocalDbClient<Shapes>> {
         const client = new LocalDbClient(shapes, options);
+        await migrateLegacyLocalForageStore(client.storeName, client.store);
         await client.loadAllValues();
         return client;
     }
@@ -115,13 +117,11 @@ export class LocalDbClient<
     ) {
         super();
         this.storeName = options.storeName || 'local-db-client';
-        this.localForageStore = LocalForage.createInstance({
-            name: this.storeName,
-        });
+        this.store = new Store(this.storeName);
 
         this.load = mapObjectValues(this.shapes, (key, shapeDefinition) => {
             return async (options: LocalDbClientGetOptions | undefined = {}) => {
-                const rawValue = await this.localForageStore.getItem(String(key));
+                const rawValue = await this.store.getItem(String(key));
 
                 if (rawValue == undefined) {
                     delete this.value[key];
@@ -154,7 +154,7 @@ export class LocalDbClient<
             }
 
             return async () => {
-                await this.localForageStore.removeItem(key);
+                await this.store.removeItem(key);
                 delete this.value[key];
                 this.dispatch(new LocalDbClientValueUpdateEvent());
             };
@@ -172,7 +172,7 @@ export class LocalDbClient<
                         {allowExtraKeys: true},
                         `LocalDbClient: Invalid value for key '${String(key)}'.`,
                     );
-                    await this.localForageStore.setItem(String(key), newValue);
+                    await this.store.setItem(String(key), newValue);
                     makeWritable(this).value[key] = newValue;
                 }
 
@@ -182,7 +182,7 @@ export class LocalDbClient<
         });
     }
 
-    private localForageStore: LocalForage;
+    private store: Store;
 
     public readonly storeName: string;
 
@@ -203,7 +203,10 @@ export class LocalDbClient<
     public async loadAllValues({
         throwErrorOnFailure = false,
     }: LocalDbClientGetOptions = {}): Promise<LocalDbClientAllValues<Shapes>> {
-        const rawValues: AnyObject = await iterateLocalForageValues(this.localForageStore);
+        const rawValues: AnyObject = {};
+        await this.store.iterate((value, key) => {
+            rawValues[key] = value;
+        });
 
         const allValues = mapObject(rawValues, (key, value) => {
             const shapeDefinition = (
@@ -249,6 +252,6 @@ export class LocalDbClient<
 
     /** Clear all values. */
     public async clear() {
-        await this.localForageStore.clear();
+        await this.store.clear();
     }
 }
