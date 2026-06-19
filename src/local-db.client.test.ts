@@ -1,11 +1,18 @@
 // cspell:word keyvaluepairs
 
 import {assert} from '@augment-vir/assert';
-import {getObjectTypedEntries, randomString} from '@augment-vir/common';
+import {getObjectTypedEntries, randomString, wait} from '@augment-vir/common';
 import {describe, it} from '@augment-vir/test';
 import {Store} from 'indexed-vir';
 import {defineShape} from 'object-shape-tester';
-import {LocalDbClient, LocalDbClientValueUpdateEvent} from './local-db.client.js';
+import {
+    defineLocalDbClientKey,
+    LocalDbClient,
+    LocalDbClientErrorEvent,
+    LocalDbClientValueUpdateEvent,
+} from './local-db.client.js';
+
+const fakeBoolean = false as boolean;
 
 const testShapes = {
     stringValue: {
@@ -17,6 +24,29 @@ const testShapes = {
     booleanValue: {
         shape: defineShape(true),
     },
+    cleanUpValue: defineLocalDbClientKey(defineShape(-1), () => {
+        return {
+            newValue: 5,
+            shouldUpdate: true,
+        };
+    }),
+    badCleanUpValue: defineLocalDbClientKey(
+        defineShape(-1),
+        // @ts-expect-error: one branch is returning a string instead of a number (for type testing purposes)
+        () => {
+            if (fakeBoolean) {
+                return {
+                    newValue: '5',
+                    shouldUpdate: true,
+                };
+            }
+
+            return {
+                newValue: 5,
+                shouldUpdate: true,
+            };
+        },
+    ),
     objectValue: {
         shape: defineShape({
             name: '',
@@ -536,6 +566,558 @@ describe(LocalDbClient.name, () => {
             // @ts-expect-error: intentionally incorrect input
             await testClient.set.stringValue(undefined);
             assert.deepEquals(await testClient.loadAllValues(), {});
+        });
+    });
+
+    describe('cleanValue', () => {
+        /**
+         * Clears any pre-existing data and opens a raw store for the given client. Typed
+         * structurally so the client's concrete shape keys are preserved at the call site.
+         */
+        async function clearAndOpenStore(client: {
+            clear: () => Promise<unknown>;
+            storeName: string;
+        }) {
+            await client.clear();
+            return new Store(client.storeName);
+        }
+
+        function createInvalidCleanClient() {
+            return LocalDbClient.createClient(
+                {
+                    target: {
+                        shape: defineShape(0),
+                        cleanValue: () => {
+                            return {
+                                shouldUpdate: true,
+                                newValue: 'not a number',
+                            };
+                        },
+                    },
+                },
+                {
+                    storeName: `test-store-${randomString(32)}`,
+                },
+            );
+        }
+
+        describe('update flow', () => {
+            it('cleans and persists a value on load', async () => {
+                const {testClient, store} = await createTestClient();
+
+                await store.setItem('cleanUpValue', 1);
+
+                assert.strictEquals(await testClient.load.cleanUpValue(), 5);
+                assert.strictEquals(testClient.value.cleanUpValue, 5);
+                assert.strictEquals(await store.getItem('cleanUpValue'), 5);
+            });
+
+            it('cleans values during loadAllValues', async () => {
+                const {testClient, store} = await createTestClient();
+
+                await store.setItem('cleanUpValue', 1);
+
+                const result = await testClient.loadAllValues();
+
+                assert.strictEquals(result.cleanUpValue, 5);
+                assert.strictEquals(await store.getItem('cleanUpValue'), 5);
+            });
+
+            it('runs cleanValue during createClient construction', async () => {
+                const storeName = `test-store-${randomString(32)}`;
+                const seedStore = new Store(storeName);
+                await seedStore.setItem('cleanUpValue', 1);
+
+                const client = await LocalDbClient.createClient(testShapes, {
+                    storeName,
+                });
+
+                assert.strictEquals(client.value.cleanUpValue, 5);
+                assert.strictEquals(await seedStore.getItem('cleanUpValue'), 5);
+            });
+
+            it('persists the cleaned value for a fresh client', async () => {
+                const {testClient, store} = await createTestClient();
+                await store.setItem('cleanUpValue', 1);
+                await testClient.load.cleanUpValue();
+
+                const freshClient = await LocalDbClient.createClient(testShapes, {
+                    storeName: testClient.storeName,
+                });
+
+                assert.strictEquals(freshClient.value.cleanUpValue, 5);
+            });
+
+            it('persists a falsy newValue', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(1), () => {
+                            return {
+                                newValue: 0,
+                                shouldUpdate: true,
+                            };
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+
+                assert.strictEquals(await client.load.target(), 0);
+                assert.strictEquals(await store.getItem('target'), 0);
+            });
+        });
+
+        describe('no-update flow', () => {
+            it('does not change or persist the value when shouldUpdate is false on load', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), () => {
+                            return {
+                                shouldUpdate: false,
+                            };
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+
+                assert.strictEquals(await client.load.target(), 7);
+                assert.strictEquals(client.value.target, 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+            });
+
+            it('does not change the value when shouldUpdate is false in loadAllValues', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), () => {
+                            return {
+                                shouldUpdate: false,
+                            };
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+
+                const result = await client.loadAllValues();
+
+                assert.strictEquals(result.target, 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+            });
+
+            it('treats an undefined return as no update', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), () => {
+                            return undefined;
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+
+                assert.strictEquals(await client.load.target(), 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+            });
+
+            it('treats a void return as no update', async () => {
+                const calls: unknown[] = [];
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), (currentValue) => {
+                            calls.push(currentValue);
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+
+                assert.strictEquals(await client.load.target(), 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+                assert.isLengthExactly(calls, 1);
+            });
+        });
+
+        describe('async cleanValue', () => {
+            it('awaits an async cleanValue that updates', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), async () => {
+                            await wait({
+                                milliseconds: 1,
+                            });
+                            return {
+                                newValue: 100,
+                                shouldUpdate: true,
+                            };
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+
+                assert.strictEquals(await client.load.target(), 100);
+                assert.strictEquals(await store.getItem('target'), 100);
+            });
+
+            it('awaits an async cleanValue that declines to update', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), async () => {
+                            await wait({
+                                milliseconds: 1,
+                            });
+                            return {
+                                shouldUpdate: false,
+                            };
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+
+                assert.strictEquals(await client.load.target(), 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+            });
+        });
+
+        describe('callback argument', () => {
+            it('passes the current stored value to cleanValue on load', async () => {
+                const receivedValues: unknown[] = [];
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), (currentValue) => {
+                            receivedValues.push(currentValue);
+                            return undefined;
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+                await client.load.target();
+
+                assert.deepEquals(receivedValues, [7]);
+            });
+
+            it('passes the current stored value to cleanValue in loadAllValues', async () => {
+                const receivedValues: unknown[] = [];
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), (currentValue) => {
+                            receivedValues.push(currentValue);
+                            return undefined;
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+                await client.loadAllValues();
+
+                assert.deepEquals(receivedValues, [7]);
+            });
+
+            it('updates only when the callback condition is met', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), (currentValue) => {
+                            if (currentValue < 0) {
+                                return {
+                                    newValue: 0,
+                                    shouldUpdate: true,
+                                };
+                            }
+                            return undefined;
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', -5);
+                assert.strictEquals(await client.load.target(), 0);
+
+                await store.setItem('target', 3);
+                assert.strictEquals(await client.load.target(), 3);
+            });
+        });
+
+        describe('skips cleanValue', () => {
+            it('does not call cleanValue when the key has no stored value', async () => {
+                const calls: unknown[] = [];
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), (currentValue) => {
+                            calls.push(currentValue);
+                            return undefined;
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                await clearAndOpenStore(client);
+
+                assert.isUndefined(await client.load.target());
+                assert.isLengthExactly(calls, 0);
+            });
+
+            it('does not call cleanValue when the stored value is invalid on load', async () => {
+                const calls: unknown[] = [];
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), (currentValue) => {
+                            calls.push(currentValue);
+                            return undefined;
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 'not a number');
+
+                assert.isUndefined(await client.load.target());
+                assert.isLengthExactly(calls, 0);
+            });
+
+            it('does not call cleanValue when the stored value is invalid in loadAllValues', async () => {
+                const calls: unknown[] = [];
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), (currentValue) => {
+                            calls.push(currentValue);
+                            return undefined;
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 'not a number');
+
+                const result = await client.loadAllValues();
+
+                assert.isUndefined(result.target);
+                assert.isLengthExactly(calls, 0);
+            });
+
+            it('does not run cleanValue for keys without one', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        plain: {
+                            shape: defineShape(''),
+                        },
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('plain', 'untouched');
+
+                assert.strictEquals(await client.load.plain(), 'untouched');
+                assert.strictEquals(await store.getItem('plain'), 'untouched');
+            });
+        });
+
+        describe('throwErrorOnFailure interplay', () => {
+            it('runs cleanValue for a valid value when throwErrorOnFailure is true on load', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), () => {
+                            return {
+                                newValue: 50,
+                                shouldUpdate: true,
+                            };
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+
+                assert.strictEquals(
+                    await client.load.target({
+                        throwErrorOnFailure: true,
+                    }),
+                    50,
+                );
+                assert.strictEquals(await store.getItem('target'), 50);
+            });
+
+            it('runs cleanValue for a valid value when throwErrorOnFailure is true in loadAllValues', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), () => {
+                            return {
+                                newValue: 50,
+                                shouldUpdate: true,
+                            };
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+
+                await store.setItem('target', 7);
+
+                const result = await client.loadAllValues({
+                    throwErrorOnFailure: true,
+                });
+
+                assert.strictEquals(result.target, 50);
+            });
+        });
+
+        describe('thrown errors', () => {
+            it('keeps the value and dispatches an error event when cleanValue throws on load', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), () => {
+                            throw new Error('clean failed');
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+                const errorEvents: InstanceType<typeof LocalDbClientErrorEvent>['detail'][] = [];
+                client.listen(LocalDbClientErrorEvent, (event) => {
+                    errorEvents.push(event.detail);
+                });
+
+                await store.setItem('target', 7);
+
+                assert.strictEquals(await client.load.target(), 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+                assert.isLengthExactly(errorEvents, 1);
+                assert.strictEquals(errorEvents[0].key, 'target');
+                assert.strictEquals(
+                    errorEvents[0].error.message,
+                    'Failed to clean LocalDBClient value: clean failed',
+                );
+            });
+
+            it('keeps the value and dispatches an error event when cleanValue throws in loadAllValues', async () => {
+                const client = await LocalDbClient.createClient(
+                    {
+                        target: defineLocalDbClientKey(defineShape(0), () => {
+                            throw new Error('clean failed');
+                        }),
+                    },
+                    {
+                        storeName: `test-store-${randomString(32)}`,
+                    },
+                );
+                const store = await clearAndOpenStore(client);
+                const errorEvents: InstanceType<typeof LocalDbClientErrorEvent>['detail'][] = [];
+                client.listen(LocalDbClientErrorEvent, (event) => {
+                    errorEvents.push(event.detail);
+                });
+
+                await store.setItem('target', 7);
+
+                const result = await client.loadAllValues();
+
+                assert.strictEquals(result.target, 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+                assert.isLengthExactly(errorEvents, 1);
+            });
+        });
+
+        describe('invalid cleaned value', () => {
+            it('rejects an invalid newValue on load: keeps the old value, does not persist, and dispatches an error event', async () => {
+                const client = await createInvalidCleanClient();
+                const store = await clearAndOpenStore(client);
+                const errorEvents: InstanceType<typeof LocalDbClientErrorEvent>['detail'][] = [];
+                client.listen(LocalDbClientErrorEvent, (event) => {
+                    errorEvents.push(event.detail);
+                });
+
+                await store.setItem('target', 7);
+
+                assert.strictEquals(await client.load.target(), 7);
+                assert.strictEquals(client.value.target, 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+                assert.isLengthExactly(errorEvents, 1);
+                assert.strictEquals(errorEvents[0].key, 'target');
+            });
+
+            it('rejects an invalid newValue in loadAllValues: keeps the old value and dispatches an error event', async () => {
+                const client = await createInvalidCleanClient();
+                const store = await clearAndOpenStore(client);
+                const errorEvents: InstanceType<typeof LocalDbClientErrorEvent>['detail'][] = [];
+                client.listen(LocalDbClientErrorEvent, (event) => {
+                    errorEvents.push(event.detail);
+                });
+
+                await store.setItem('target', 7);
+
+                const result = await client.loadAllValues();
+
+                assert.strictEquals(result.target, 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+                assert.isLengthExactly(errorEvents, 1);
+            });
+
+            it('keeps the old value across repeated loads', async () => {
+                const client = await createInvalidCleanClient();
+                const store = await clearAndOpenStore(client);
+                await store.setItem('target', 7);
+
+                assert.strictEquals(await client.load.target(), 7);
+                assert.strictEquals(await client.load.target(), 7);
+                assert.strictEquals(await store.getItem('target'), 7);
+            });
         });
     });
 
