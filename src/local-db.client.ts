@@ -12,11 +12,20 @@ import {defineTypedEvent, ListenTarget} from 'typed-event-target';
 import {migrateLegacyLocalForageStore} from './migrate-local-forage.js';
 
 /**
+ * A single shape definition entry for {@link LocalDbClient}.
+ *
+ * @category Internal
+ */
+export type LocalDbClientShapeDefinition = {
+    shape: Shape;
+};
+
+/**
  * Base type for the shapes type parameter in {@link LocalDbClient}.
  *
  * @category Internal
  */
-export type BaseLocalDbClientShapes = Record<string, Shape>;
+export type BaseLocalDbClientShapes = Record<string, LocalDbClientShapeDefinition>;
 
 /**
  * Options for `LocalDbClient.load`.
@@ -41,7 +50,7 @@ export type LocalDbClientGetOptions = PartialWithUndefined<{
 export type LocalDbClientLoad<Shapes extends BaseLocalDbClientShapes> = {
     [Key in keyof Shapes]: (
         options?: LocalDbClientGetOptions | undefined,
-    ) => Promise<Shapes[Key]['runtimeType'] | undefined>;
+    ) => Promise<Shapes[Key]['shape']['runtimeType'] | undefined>;
 };
 
 /**
@@ -57,8 +66,8 @@ export const LocalDbClientValueUpdateEvent = defineTypedEvent('local-db-client-v
  */
 export type LocalDbClientSet<Shapes extends BaseLocalDbClientShapes> = {
     [Key in keyof Shapes]: (
-        value: Shapes[Key]['runtimeType'],
-    ) => Promise<Shapes[Key]['runtimeType']>;
+        value: Shapes[Key]['shape']['runtimeType'],
+    ) => Promise<Shapes[Key]['shape']['runtimeType']>;
 };
 /**
  * Type for `LocalDbClient.delete`.
@@ -74,7 +83,7 @@ export type LocalDbClientDelete<Shapes extends BaseLocalDbClientShapes> = {
  * @category Internal
  */
 export type LocalDbClientAllValues<Shapes extends BaseLocalDbClientShapes> = Partial<{
-    [Key in keyof Shapes]: Shapes[Key]['runtimeType'];
+    [Key in keyof Shapes]: Shapes[Key]['shape']['runtimeType'];
 }>;
 
 /**
@@ -132,14 +141,14 @@ export class LocalDbClient<
                 if (options.throwErrorOnFailure) {
                     assertValidShape(
                         rawValue,
-                        shapeDefinition,
+                        shapeDefinition.shape,
                         {
                             allowExtraKeys: true,
                         },
                         `Invalid value at key '${String(key)}'`,
                     );
                 } else if (
-                    !checkValidShape(rawValue, shapeDefinition, {
+                    !checkValidShape(rawValue, shapeDefinition.shape, {
                         allowExtraKeys: true,
                     })
                 ) {
@@ -174,7 +183,7 @@ export class LocalDbClient<
                 } else {
                     assertValidShape(
                         newValue,
-                        this.shapes[key],
+                        this.shapes[key].shape,
                         {
                             allowExtraKeys: true,
                         },
@@ -218,7 +227,10 @@ export class LocalDbClient<
 
         const allValues = mapObject(rawValues, (key, value) => {
             const shapeDefinition = (
-                this.shapes satisfies Record<PropertyKey, Shape> as Record<PropertyKey, Shape>
+                this.shapes satisfies Record<PropertyKey, LocalDbClientShapeDefinition> as Record<
+                    PropertyKey,
+                    LocalDbClientShapeDefinition
+                >
             )[key];
             if (!shapeDefinition) {
                 return undefined;
@@ -227,14 +239,14 @@ export class LocalDbClient<
             if (throwErrorOnFailure) {
                 assertValidShape(
                     value,
-                    shapeDefinition,
+                    shapeDefinition.shape,
                     {
                         allowExtraKeys: true,
                     },
                     `Invalid value at key '${String(key)}'`,
                 );
             } else if (
-                !checkValidShape(value, shapeDefinition, {
+                !checkValidShape(value, shapeDefinition.shape, {
                     allowExtraKeys: true,
                 })
             ) {

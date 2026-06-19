@@ -21,14 +21,22 @@ import {defineShape} from 'object-shape-tester';
 import {LocalDbClient} from 'local-db-client';
 
 const myClient = await LocalDbClient.createClient({
-    stringValue: defineShape(''),
-    numberValue: defineShape(-1),
-    booleanValue: defineShape(false),
-    objectValue: defineShape({
-        name: '',
-        age: 0,
-        location: '',
-    }),
+    stringValue: {
+        shape: defineShape(''),
+    },
+    numberValue: {
+        shape: defineShape(-1),
+    },
+    booleanValue: {
+        shape: defineShape(false),
+    },
+    objectValue: {
+        shape: defineShape({
+            name: '',
+            age: 0,
+            location: '',
+        }),
+    },
 });
 
 /** Set values with type safety. */

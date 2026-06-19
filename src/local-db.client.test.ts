@@ -8,19 +8,31 @@ import {defineShape} from 'object-shape-tester';
 import {LocalDbClient, LocalDbClientValueUpdateEvent} from './local-db.client.js';
 
 const testShapes = {
-    stringValue: defineShape('default string'),
-    numberValue: defineShape(42),
-    booleanValue: defineShape(true),
-    objectValue: defineShape({
-        name: '',
-        age: 0,
-    }),
-    arrayValue: defineShape(['']),
-    nestedValue: defineShape({
-        outer: {
-            inner: '',
-        },
-    }),
+    stringValue: {
+        shape: defineShape('default string'),
+    },
+    numberValue: {
+        shape: defineShape(42),
+    },
+    booleanValue: {
+        shape: defineShape(true),
+    },
+    objectValue: {
+        shape: defineShape({
+            name: '',
+            age: 0,
+        }),
+    },
+    arrayValue: {
+        shape: defineShape(['']),
+    },
+    nestedValue: {
+        shape: defineShape({
+            outer: {
+                inner: '',
+            },
+        }),
+    },
 };
 
 describe(LocalDbClient.name, () => {
@@ -56,7 +68,9 @@ describe(LocalDbClient.name, () => {
         await assert.throws(
             () =>
                 LocalDbClient.createClient({
-                    [Symbol('test')]: defineShape('test'),
+                    [Symbol('test')]: {
+                        shape: defineShape('test'),
+                    },
                 }),
             {
                 matchMessage: 'Cannot load by non-string key.',
